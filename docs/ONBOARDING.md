@@ -12,12 +12,35 @@
    ```bash
    agent-mesh init <agent-name>
    ```
-   Creates: age key pair, `~/.hermes-mesh/mesh.conf`, clones both repos.
+   Creates: age key pair, `~/.agent-mesh/agent-mesh.conf`, clones both repos.
+   If `gh` is authenticated, missing repos are created automatically
+   (`gh repo create`) — no manual GitHub setup needed.
+
 5. **Push the first registration**:
    ```bash
    agent-mesh sync
    ```
    → creates `agents/<name>/` + `vault/keys/<name>.age.pub`.
+
+## Configuration
+
+The agent reads configuration from three sources (highest priority first):
+
+1. **Environment variables** — `AGENT_MESH_HOME`, `AGENT_MESH_GH_ORG`,
+   `AGENT_MESH_PUBLIC_REPO`, `AGENT_MESH_PRIVATE_REPO`, `PYTHON_BIN`
+2. **`~/.agent-mesh/agent-mesh.conf`** — written by `agent-mesh init`;
+   persists `GH_ORG`, `PUBLIC_REPO`, `PRIVATE_REPO`, `PYTHON_BIN` when
+   they differ from defaults
+3. **Defaults** — `moinsen-dev`, `agent-mesh`, `agent-mesh-memories`
+
+Example: use your own GitHub account instead of the upstream org:
+
+```bash
+export AGENT_MESH_GH_ORG="my-org"
+agent-mesh init my-agent   # GH_ORG is persisted to agent-mesh.conf
+# later commands work without the env var:
+agent-mesh sync
+```
 6. **Test vault access**:
    ```bash
    agent-mesh vault list    # should show the shared secrets
@@ -27,7 +50,7 @@
    must re-set one secret once — then the new key becomes a recipient.)
 7. **Set up the cron** (fallback; webhook replaces it on the hub):
    ```bash
-   echo "0 6 * * * root /usr/local/bin/agent-agent-mesh sync >> /var/log/mesh-sync.log 2>&1" \
+   echo "0 6 * * * root /usr/local/bin/agent-mesh sync >> /var/log/mesh-sync.log 2>&1" \
      > /etc/cron.d/mesh-sync
    ```
 8. **Assign a role** (default is `worker`):

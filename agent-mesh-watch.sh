@@ -24,8 +24,8 @@ CONF="$AGENT_MESH_HOME/agent-mesh.conf"
 MEMORIES_DIR="$AGENT_MESH_HOME/memories"
 FRAMEWORK_DIR="$AGENT_MESH_HOME/framework"
 BIN="${AGENT_MESH_BIN:-$(dirname "$(readlink -f "$0")")/agent-mesh}"
-GH_ORG="${AGENT_MESH_GH_ORG:-moinsen-dev}"
-PUBLIC_REPO="agent-mesh"
+GH_ORG="${AGENT_MESH_GH_ORG:-${GH_ORG:-moinsen-dev}}"
+PUBLIC_REPO="${AGENT_MESH_PUBLIC_REPO:-${PUBLIC_REPO:-agent-mesh}}"
 
 INTERVAL="${1:-60}"
 # Nur positive Zahlen

@@ -25,9 +25,11 @@ set -euo pipefail
 
 AGENT_MESH_HOME="${AGENT_MESH_HOME:-$HOME/.agent-mesh}"
 CONF="$AGENT_MESH_HOME/agent-mesh.conf"
-GH_ORG="${AGENT_MESH_GH_ORG:-moinsen-dev}"
-PUBLIC_REPO="agent-mesh"
-PRIVATE_REPO="agent-mesh-memories"
+# Basis-Konfiguration laden (env vars + conf-Datei, falls vorhanden)
+GH_ORG=""
+PUBLIC_REPO=""
+PRIVATE_REPO=""
+PYTHON_BIN="${PYTHON_BIN:-}"
 MEMORIES_DIR="$AGENT_MESH_HOME/memories"          # Klon des privaten Repos
 FRAMEWORK_DIR="$AGENT_MESH_HOME/framework"        # Klon des public Repos
 
@@ -65,11 +67,13 @@ warn() { echo "⚠️  $*" >&2; }
 
 # ── Windows/Git-Bash-Kompatibilitäts-Layer (Issue #1, #2 — 2026-08-22) ──
 # Python: "$PYTHON_BIN" auf POSIX, python auf Windows (kein "$PYTHON_BIN"-Alias)
+# Bekannte Schreibweisen/Orte werden durchprobiert (python3 → python → py).
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [ -z "$PYTHON_BIN" ]; then
-  if command -v "$PYTHON_BIN" >/dev/null 2>&1; then PYTHON_BIN="$PYTHON_BIN"
-  elif command -v python >/dev/null 2>&1; then PYTHON_BIN=python
-  else die "Python fehlt — bitte installieren (https://www.python.org)"; fi
+  for cand in python3 python py; do
+    if command -v "$cand" >/dev/null 2>&1; then PYTHON_BIN="$cand"; break; fi
+  done
+  [ -n "$PYTHON_BIN" ] || die "Python fehlt — bitte installieren (https://www.python.org)"
 fi
 
 # age/age-keygen: .exe-Suffix auf Windows auflösen
@@ -95,8 +99,47 @@ winpath() {
 }
 
 # ─────────────────────────── Konfiguration ───────────────────────────
+# Zentrale Konfig-Logik: liest agent-mesh.conf (KEY=VALUE Zeilen) und
+# erlaubt env-var-Overrides. Priorität: env var > conf-Datei > Default.
+#
+# Unterstützte Schlüssel in agent-mesh.conf:
+#   AGENT_NAME=          Agent-Name
+#   AGE_PUB=             age-Public-Key
+#   GH_ORG=              GitHub-Org/User (Repo-Prefix)
+#   PUBLIC_REPO=         Framework-Repo-Name
+#   PRIVATE_REPO=        Memories-Repo-Name
+#   GIT_SSH_COMMAND=     Optionaler SSH-Befehl für Git-Operationen
+#   PYTHON_BIN=          Python-Interpreter (falls nicht im PATH)
+load_config() {
+  # Conf-Datei einlesen (falls vorhanden) — env vars haben Vorrang
+  if [ -f "$CONF" ]; then
+    while IFS='=' read -r key val; do
+      case "$key" in
+        AGENT_NAME|AGE_PUB|GH_ORG|PUBLIC_REPO|PRIVATE_REPO|GIT_SSH_COMMAND|PYTHON_BIN)
+          # Nur setzen wenn nicht schon als env var gesetzt
+          if [ -z "${!key:-}" ]; then
+            export "$key=$val"
+          fi
+          ;;
+      esac
+    done < "$CONF"
+  fi
+
+  # Defaults (nach Conf-Datei, damit diese überschreiben kann)
+  GH_ORG="${AGENT_MESH_GH_ORG:-${GH_ORG:-moinsen-dev}}"
+  PUBLIC_REPO="${AGENT_MESH_PUBLIC_REPO:-${PUBLIC_REPO:-agent-mesh}}"
+  PRIVATE_REPO="${AGENT_MESH_PRIVATE_REPO:-${PRIVATE_REPO:-agent-mesh-memories}}"
+  PYTHON_BIN="${PYTHON_BIN:-}"
+
+  # SSH-Key-Option exportieren falls in Conf
+  if [ -n "${GIT_SSH_COMMAND:-}" ]; then
+    export GIT_SSH_COMMAND
+  fi
+}
+
 load_conf() {
   [ -f "$CONF" ] || die "Nicht initialisiert — zuerst: mesh init <agent-name>"
+  load_config
   AGENT_NAME=$(grep "^AGENT_NAME=" "$CONF" | cut -d= -f2- || true)
   AGE_PUB=$(grep "^AGE_PUB=" "$CONF" | cut -d= -f2- || true)
   AGE_KEY_FILE="$AGENT_MESH_HOME/keys/$AGENT_NAME.age"
@@ -122,6 +165,8 @@ cmd_init() {
   [ $# -ge 1 ] || die "Usage: agent-mesh init <agent-name>"
   local name="$1"
   [ -f "$CONF" ] && die "Bereits initialisiert ($(grep AGENT_NAME= "$CONF")). Für Neustart: rm -rf $AGENT_MESH_HOME"
+  # Konfiguration laden (env vars; conf existiert noch nicht)
+  load_config
   # Issue #1: NUR keys/ vorab anlegen — Klon-Ziele NICHT (git clone braucht leere/nicht existente Ziele)
   mkdir -p "$AGENT_MESH_HOME/keys"
 
@@ -135,14 +180,46 @@ cmd_init() {
   [ -n "$pub" ] || die "age-Key konnte nicht gelesen werden"
   chmod 600 "$AGENT_MESH_HOME/keys/$name.age" 2>/dev/null || true
 
-  cat > "$CONF" << EOF
-# Agent-Mesh Konfiguration (lokal, nie committen)
-AGENT_NAME=$name
-AGE_PUB=$pub
-EOF
+  # Konfig-Datei schreiben — enthält jetzt auch Repo-Konfiguration,
+  # damit ein späteres `init`/`sync` ohne env vars funktioniert.
+  {
+    echo "# Agent-Mesh Konfiguration (lokal, nie committen)"
+    echo "AGENT_NAME=$name"
+    echo "AGE_PUB=$pub"
+    # Repo-Konfiguration persistieren (falls nicht default)
+    [ -n "$GH_ORG" ] && [ "$GH_ORG" != "moinsen-dev" ] && echo "GH_ORG=$GH_ORG"
+    [ -n "$PUBLIC_REPO" ] && [ "$PUBLIC_REPO" != "agent-mesh" ] && echo "PUBLIC_REPO=$PUBLIC_REPO"
+    [ -n "$PRIVATE_REPO" ] && [ "$PRIVATE_REPO" != "agent-mesh-memories" ] && echo "PRIVATE_REPO=$PRIVATE_REPO"
+    [ -n "$PYTHON_BIN" ] && echo "PYTHON_BIN=$PYTHON_BIN"
+  } > "$CONF"
   chmod 600 "$CONF"
 
   # Repos klonen — Protokoll aus gh ableiten (Issue #1: OAuth/HTTPS-konsistent!)
+  # Onboarding-Verbesserung: prüfe gh-Auth und lege fehlende Repos automatisch an.
+  if ! gh auth status >/dev/null 2>&1; then
+    warn "GitHub-Auth fehlt — ohne gh-Auth wird SSH verwendet (oder: 'agent-mesh connect' für Browser-Auth)."
+    warn "Falls die Repos NICHT existieren: 'gh auth login' zuerst ausführen, dann init erneut."
+  fi
+
+  # Privates Repo: existiert es? Wenn nicht → automatisch anlegen (gh repo create)
+  if ! git ls-remote "$(git_clone_url "$PRIVATE_REPO")" HEAD >/dev/null 2>&1; then
+    info "Privates Repo $GH_ORG/$PRIVATE_REPO existiert nicht — lege es an …"
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+      # Org vs User unterscheiden
+      local target="$GH_ORG/$PRIVATE_REPO"
+      if gh repo view "$target" >/dev/null 2>&1; then
+        info "Repo existiert bereits (gh repo view ok)."
+      else
+        if ! gh repo create "$target" --private --description "Agent-Mesh private data repo (memories/skills/vault) for $GH_ORG agents" 2>&1; then
+          warn "Repo-Erstellung fehlgeschlagen — lege es manuell an: https://github.com/new (Name: $PRIVATE_REPO, Private)"
+        fi
+      fi
+    else
+      warn "gh fehlt oder nicht eingeloggt — kann $GH_ORG/$PRIVATE_REPO nicht automatisch anlegen."
+      warn "Manuell: https://github.com/new → Name '$PRIVATE_REPO', Private → dann init erneut."
+    fi
+  fi
+
   info "Klonen: $GH_ORG/$PRIVATE_REPO …"
   if ! git clone "$(git_clone_url "$PRIVATE_REPO")" "$MEMORIES_DIR" 2>/dev/null; then
     # Ziel existiert evtl. (vom alten Verhalten) — nur klonen wenn es kein Git-Repo ist

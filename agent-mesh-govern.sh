@@ -17,8 +17,9 @@
 set -euo pipefail
 
 GOV_FILE=".github/governance.md"
-GH_ORG="${AGENT_MESH_GH_ORG:-moinsen-dev}"
-PUBLIC_REPO="agent-mesh"
+# GH_ORG/PUBLIC_REPO aus Konfiguration laden (env var oder agent-mesh.conf)
+GH_ORG="${AGENT_MESH_GH_ORG:-${GH_ORG:-moinsen-dev}}"
+PUBLIC_REPO="${AGENT_MESH_PUBLIC_REPO:-${PUBLIC_REPO:-agent-mesh}}"
 
 # Stichwort → Agent-Zuordnung (anpassbar!)
 agent_for_issue() {

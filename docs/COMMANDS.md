@@ -12,6 +12,7 @@
 | `agent-mesh vault get <key>` | Decrypt with your own key |
 | `agent-mesh vault list` | List secret keys |
 | `agent-mesh send <agent> <text>` | Send a message (git queue, no open ports) |
+| `agent-mesh broadcast <text>` | Send an encrypted message to all agents |
 | `agent-mesh reply <msg-id> <text>` | Reply (auto-finds the original) |
 | `agent-mesh inbox` | Read your mailbox |
 | `agent-mesh route <agent> <text>` | Hub only: route a message |

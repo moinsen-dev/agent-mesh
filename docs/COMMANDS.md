@@ -20,3 +20,4 @@
 | `agent-mesh insight add <text>` | Share a learning (markdown) |
 | `agent-mesh watch [seconds]` | Auto-sync daemon — poll GitHub, sync when changed (default 60s) |
 | `agent-mesh update [--check]` | Auto-update the framework (v-file) |
+| `agent-mesh service install` | Install the agent as a system service (since v1.5.0) |
